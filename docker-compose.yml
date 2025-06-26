@@ -1,0 +1,14 @@
+
+version: '3'
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: procmon-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=procmon
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=procmon
+    volumes:
+      - ./data:/var/lib/postgresql/data
