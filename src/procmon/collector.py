@@ -6,8 +6,9 @@ from psycopg2 import Error
 from .db import get_db_connection
 import sys
 import os
+import tempfile
 
-PID_FILE = "/tmp/procmon_collector.pid"
+PID_FILE = os.path.join(tempfile.gettempdir(), "procmon_collector.pid")
 
 MAX_RETRIES = 5
 RETRY_DELAY = 5 # seconds

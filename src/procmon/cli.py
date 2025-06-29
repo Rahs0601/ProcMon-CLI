@@ -16,40 +16,73 @@ def main():
     pass
 
 from rich.live import Live
+from rich.panel import Panel
+from rich.progress_bar import ProgressBar
+from rich.layout import Layout
 
 @main.command()
 def live():
     """Display a live view of system processes."""
     console = Console()
 
-    def generate_table() -> Table:
-        table = Table(title="Live Process Monitor")
+    def generate_layout() -> Layout:
+        # Header
+        mem = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent(interval=None)
+        disk_io = psutil.disk_io_counters()
+
+        mem_bar = ProgressBar(total=100, completed=mem.percent, width=40)
+        cpu_bar = ProgressBar(total=100, completed=cpu_percent, width=40)
+
+        grid = Table.grid(expand=True)
+        grid.add_column(justify="left", ratio=1)
+        grid.add_column(justify="left", ratio=2)
+        grid.add_row(f"[bold green]CPU Usage[/]: {cpu_percent:.1f}%", cpu_bar)
+        grid.add_row(f"[bold yellow]Mem Usage[/]: {mem.used/1024**3:.2f}G/{mem.total/1024**3:.2f}G ({mem.percent}%)", mem_bar)
+        if disk_io:
+            grid.add_row(f"[bold blue]Disk I/O[/]: Read {disk_io.read_bytes/1024**3:.2f} GB / Write {disk_io.write_bytes/1024**3:.2f} GB")
+
+        # Process Table
+        table = Table(title="Processes")
         table.add_column("PID", justify="right", style="cyan", no_wrap=True)
         table.add_column("Process Name", style="magenta")
         table.add_column("CPU %", justify="right", style="green")
         table.add_column("Memory %", justify="right", style="yellow")
+        table.add_column("Read (MB)", justify="right", style="blue")
+        table.add_column("Write (MB)", justify="right", style="red")
 
         processes = sorted(
-            psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']),
+            psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'io_counters']),
             key=lambda p: p.info['cpu_percent'],
             reverse=True
         )
 
-        for proc in processes[:console.height - 4]:  # Limit to screen height
+        for proc in processes[:console.height - 10]:  # Adjust for header
             try:
+                io_counters = proc.info.get('io_counters')
+                read_mb = io_counters.read_bytes / 1024**2 if io_counters else 0
+                write_mb = io_counters.write_bytes / 1024**2 if io_counters else 0
                 table.add_row(
                     str(proc.info['pid']),
                     proc.info['name'],
                     f"{proc.info['cpu_percent']:.2f}",
                     f"{proc.info['memory_percent']:.2f}",
+                    f"{read_mb:.2f}",
+                    f"{write_mb:.2f}",
                 )
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-        return table
 
-    with Live(generate_table(), screen=True, transient=True) as live:
+        layout = Layout()
+        layout.split(
+            Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
+            Layout(Panel(table, border_style="blue"))
+        )
+        return layout
+
+    with Live(generate_layout(), screen=True, transient=True, refresh_per_second=2) as live:
         while True:
-            live.update(generate_table())
+            live.update(generate_layout())
             time.sleep(0.5)
 
 @main.command()
@@ -78,7 +111,10 @@ def stop_collector():
     pid = read_pid_file()
     if pid:
         try:
-            os.kill(pid, signal.SIGTERM)
+            if sys.platform == "win32":
+                os.kill(pid, signal.CTRL_C_EVENT)
+            else:
+                os.kill(pid, signal.SIGTERM)
             delete_pid_file()
             click.echo(f"Collector (PID: {pid}) stopped.")
         except ProcessLookupError:
