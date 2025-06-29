@@ -9,7 +9,8 @@ dependencies = [
     "psutil>=7.0.0",
     "psycopg2-binary>=2.9.10",
     "rich>=14.0.0",
-    "python-dotenv>=1.0.0"
+    "python-dotenv>=1.0.0",
+    "pynvml>=11.5.0"
 ]
 
 [project.optional-dependencies]

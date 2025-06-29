@@ -8,6 +8,12 @@ import sys
 import os
 import tempfile
 
+try:
+    from pynvml import * # type: ignore
+    HAS_NVML = True
+except:
+    HAS_NVML = False
+
 PID_FILE = os.path.join(tempfile.gettempdir(), "procmon_collector.pid")
 
 MAX_RETRIES = 5
@@ -80,6 +86,24 @@ def collect_data():
                         break # Exit if reconnection fails
                     cur = conn.cursor() # Get new cursor from new connection
 
+            if HAS_NVML:
+                gpu_data = collect_gpu_data()
+                if gpu_data:
+                    try:
+                        cur.executemany(
+                            "INSERT INTO gpu_usage (time, gpu_index, gpu_name, utilization_gpu, utilization_memory, temperature_gpu, fan_speed, power_usage) VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s)",
+                            gpu_data
+                        )
+                        conn.commit()
+                    except Error as e:
+                        print(f"Database error during GPU data insertion: {e}")
+                        conn.rollback()
+                        conn.close()
+                        conn = retry_get_db_connection()
+                        if not conn:
+                            break
+                        cur = conn.cursor()
+
             time.sleep(5) # Collect data every 5 seconds
 
     except KeyboardInterrupt:
@@ -90,6 +114,37 @@ def collect_data():
         if conn:
             conn.close()
         delete_pid_file()
+
+def collect_gpu_data():
+    gpu_metrics = []
+    try:
+        nvmlInit()
+        device_count = nvmlDeviceGetCount()
+        for i in range(device_count):
+            handle = nvmlDeviceGetHandleByIndex(i)
+            gpu_name = nvmlDeviceGetName(handle)
+            utilization = nvmlDeviceGetUtilizationRates(handle)
+            temperature = nvmlDeviceGetTemperature(handle, NVML_TEMP_GPU)
+            fan_speed = nvmlDeviceGetFanSpeed(handle)
+            power_usage = nvmlDeviceGetPowerUsage(handle) / 1000 # Convert mW to W
+
+            gpu_metrics.append((
+                i,
+                gpu_name,
+                utilization.gpu,
+                utilization.memory,
+                temperature,
+                fan_speed,
+                power_usage
+            ))
+    except NVMLError as error:
+        print(f"NVML Error: {error}")
+    finally:
+        try:
+            nvmlShutdown()
+        except NVMLError as error:
+            print(f"NVML Shutdown Error: {error}")
+    return gpu_metrics
 
 if __name__ == "__main__":
     collect_data()

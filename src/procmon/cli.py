@@ -5,7 +5,7 @@ from rich.table import Table
 import psutil
 import time
 from .db import setup_database
-from .collector import collect_data, read_pid_file, delete_pid_file, PID_FILE
+from .collector import collect_data, read_pid_file, delete_pid_file, PID_FILE, HAS_NVML
 from .history import query_history
 import os
 import signal
@@ -39,6 +39,26 @@ def live():
         grid.add_column(justify="left", ratio=2)
         grid.add_row(f"[bold green]CPU Usage[/]: {cpu_percent:.1f}%", cpu_bar)
         grid.add_row(f"[bold yellow]Mem Usage[/]: {mem.used/1024**3:.2f}G/{mem.total/1024**3:.2f}G ({mem.percent}%)", mem_bar)
+
+        if HAS_NVML:
+            from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown, NVMLError
+            try:
+                nvmlInit()
+                device_count = nvmlDeviceGetCount()
+                for i in range(device_count):
+                    handle = nvmlDeviceGetHandleByIndex(i)
+                    utilization = nvmlDeviceGetUtilizationRates(handle)
+                    gpu_percent = utilization.gpu
+                    gpu_bar = ProgressBar(total=100, completed=gpu_percent, width=40)
+                    grid.add_row(f"[bold red]GPU {i} Usage[/]: {gpu_percent:.1f}%", gpu_bar)
+            except NVMLError:
+                pass # Fail silently if we can't get GPU info for the overview
+            finally:
+                try:
+                    nvmlShutdown()
+                except NVMLError:
+                    pass
+        
         if disk_io:
             grid.add_row(f"[bold blue]Disk I/O[/]: Read {disk_io.read_bytes/1024**3:.2f} GB / Write {disk_io.write_bytes/1024**3:.2f} GB")
 
@@ -74,10 +94,77 @@ def live():
                 pass
 
         layout = Layout()
-        layout.split(
-            Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
-            Layout(Panel(table, border_style="blue"))
-        )
+        if HAS_NVML:
+            from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetName, nvmlDeviceGetUtilizationRates, nvmlShutdown, NVMLError, NVML_TEMPERATURE_GPU, nvmlDeviceGetTemperature, nvmlDeviceGetFanSpeed, nvmlDeviceGetPowerUsage
+            gpu_table = Table(title="GPU Usage")
+            gpu_table.add_column("GPU", style="cyan")
+            gpu_table.add_column("Name", style="magenta")
+            gpu_table.add_column("GPU Util %", justify="right", style="green")
+            gpu_table.add_column("Mem Util %", justify="right", style="yellow")
+            gpu_table.add_column("Temp (C)", justify="right", style="red")
+            gpu_table.add_column("Fan Speed %", justify="right", style="blue")
+            gpu_table.add_column("Power (W)", justify="right", style="purple")
+
+            try:
+                nvmlInit()
+                device_count = nvmlDeviceGetCount()
+                for i in range(device_count):
+                    handle = nvmlDeviceGetHandleByIndex(i)
+                    gpu_name = nvmlDeviceGetName(handle)
+                    
+                    try:
+                        utilization = nvmlDeviceGetUtilizationRates(handle)
+                        gpu_util = f"{utilization.gpu:.1f}"
+                        mem_util = f"{utilization.memory:.1f}"
+                    except NVMLError:
+                        gpu_util = "N/A"
+                        mem_util = "N/A"
+
+                    try:
+                        temperature = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
+                        temp_str = f"{temperature:.1f}"
+                    except NVMLError:
+                        temp_str = "N/A"
+
+                    try:
+                        fan_speed = nvmlDeviceGetFanSpeed(handle)
+                        fan_str = f"{fan_speed:.1f}"
+                    except NVMLError:
+                        fan_str = "N/A"
+
+                    try:
+                        power_usage = nvmlDeviceGetPowerUsage(handle) / 1000  # Convert mW to W
+                        power_str = f"{power_usage:.1f}"
+                    except NVMLError:
+                        power_str = "N/A"
+
+                    gpu_table.add_row(
+                        str(i),
+                        gpu_name,
+                        gpu_util,
+                        mem_util,
+                        temp_str,
+                        fan_str,
+                        power_str
+                    )
+            except NVMLError as error:
+                gpu_table = Panel(f"[red]NVML Error: {error}[/red]", title="GPU Usage")
+            finally:
+                try:
+                    nvmlShutdown()
+                except NVMLError as error:
+                    pass # Already handled, or not initialized
+
+            layout.split(
+                Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
+                Layout(Panel(gpu_table, border_style="red")),
+                Layout(Panel(table, border_style="blue"))
+            )
+        else:
+            layout.split(
+                Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
+                Layout(Panel(table, border_style="blue"))
+            )
         return layout
 
     with Live(generate_layout(), screen=True, transient=True, refresh_per_second=2) as live:
@@ -150,7 +237,9 @@ def status_collector():
 @click.option('--end-time', '-e', help='End time for the query (e.g., "2023-01-02", "now").')
 @click.option('--aggregate', '-a', type=click.Choice(['hourly', 'daily', 'weekly', 'monthly']), help='Aggregate data by hour, day, week, or month.')
 @click.option('--output-format', '-o', type=click.Choice(['table', 'json', 'csv']), default='table', help='Output format for the historical data.')
-def history(process_name, pid, start_time, end_time, aggregate, output_format):
+@click.option('--gpu', is_flag=True, help='Query GPU usage history.')
+@click.option('--gpu-index', type=int, help='Filter GPU usage by GPU index.')
+def history(process_name, pid, start_time, end_time, aggregate, output_format, gpu, gpu_index):
     """Query historical process data."""
     query_history(process_name, pid, start_time, end_time, aggregate, output_format)
 

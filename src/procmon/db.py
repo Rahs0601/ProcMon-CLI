@@ -20,7 +20,29 @@ def setup_database(conn=None):
     if _conn:
         try:
             cur = _conn.cursor()
-            cur.execute("CREATE TABLE IF NOT EXISTS processes (id SERIAL PRIMARY KEY);")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS processes (
+                    id SERIAL PRIMARY KEY,
+                    time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    pid INTEGER,
+                    name VARCHAR(255),
+                    cpu_percent REAL,
+                    memory_percent REAL
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gpu_usage (
+                    id SERIAL PRIMARY KEY,
+                    time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    gpu_index INTEGER,
+                    gpu_name VARCHAR(255),
+                    utilization_gpu REAL,
+                    utilization_memory REAL,
+                    temperature_gpu REAL,
+                    fan_speed REAL,
+                    power_usage REAL
+                );
+            """)
             _conn.commit()
         except Error as e:
             print(f"Error setting up database: {e}")
