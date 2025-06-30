@@ -94,70 +94,75 @@ def live():
                 pass
 
         layout = Layout()
+        gpu_panel_item = None
         if HAS_NVML:
             from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetName, nvmlDeviceGetUtilizationRates, nvmlShutdown, NVMLError, NVML_TEMPERATURE_GPU, nvmlDeviceGetTemperature, nvmlDeviceGetFanSpeed, nvmlDeviceGetPowerUsage
-            gpu_table = Table(title="GPU Usage")
-            gpu_table.add_column("GPU", style="cyan")
-            gpu_table.add_column("Name", style="magenta")
-            gpu_table.add_column("GPU Util %", justify="right", style="green")
-            gpu_table.add_column("Mem Util %", justify="right", style="yellow")
-            gpu_table.add_column("Temp (C)", justify="right", style="red")
-            gpu_table.add_column("Fan Speed %", justify="right", style="blue")
-            gpu_table.add_column("Power (W)", justify="right", style="purple")
-
+            
             try:
                 nvmlInit()
-                device_count = nvmlDeviceGetCount()
-                for i in range(device_count):
-                    handle = nvmlDeviceGetHandleByIndex(i)
-                    gpu_name = nvmlDeviceGetName(handle)
-                    
-                    try:
-                        utilization = nvmlDeviceGetUtilizationRates(handle)
-                        gpu_util = f"{utilization.gpu:.1f}"
-                        mem_util = f"{utilization.memory:.1f}"
-                    except NVMLError:
-                        gpu_util = "N/A"
-                        mem_util = "N/A"
+                if nvmlDeviceGetCount() > 0:
+                    gpu_table = Table(title="GPU Usage")
+                    gpu_table.add_column("GPU", style="cyan")
+                    gpu_table.add_column("Name", style="magenta")
+                    gpu_table.add_column("GPU Util %", justify="right", style="green")
+                    gpu_table.add_column("Mem Util %", justify="right", style="yellow")
+                    gpu_table.add_column("Temp (C)", justify="right", style="red")
+                    gpu_table.add_column("Fan Speed %", justify="right", style="blue")
+                    gpu_table.add_column("Power (W)", justify="right", style="purple")
 
-                    try:
-                        temperature = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
-                        temp_str = f"{temperature:.1f}"
-                    except NVMLError:
-                        temp_str = "N/A"
+                    device_count = nvmlDeviceGetCount()
+                    for i in range(device_count):
+                        handle = nvmlDeviceGetHandleByIndex(i)
+                        gpu_name = nvmlDeviceGetName(handle)
+                        
+                        try:
+                            utilization = nvmlDeviceGetUtilizationRates(handle)
+                            gpu_util = f"{utilization.gpu:.1f}"
+                            mem_util = f"{utilization.memory:.1f}"
+                        except NVMLError:
+                            gpu_util = "N/A"
+                            mem_util = "N/A"
 
-                    try:
-                        fan_speed = nvmlDeviceGetFanSpeed(handle)
-                        fan_str = f"{fan_speed:.1f}"
-                    except NVMLError:
-                        fan_str = "N/A"
+                        try:
+                            temperature = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
+                            temp_str = f"{temperature:.1f}"
+                        except NVMLError:
+                            temp_str = "N/A"
 
-                    try:
-                        power_usage = nvmlDeviceGetPowerUsage(handle) / 1000  # Convert mW to W
-                        power_str = f"{power_usage:.1f}"
-                    except NVMLError:
-                        power_str = "N/A"
+                        try:
+                            fan_speed = nvmlDeviceGetFanSpeed(handle)
+                            fan_str = f"{fan_speed:.1f}"
+                        except NVMLError:
+                            fan_str = "N/A"
 
-                    gpu_table.add_row(
-                        str(i),
-                        gpu_name,
-                        gpu_util,
-                        mem_util,
-                        temp_str,
-                        fan_str,
-                        power_str
-                    )
-            except NVMLError as error:
-                gpu_table = Panel(f"[red]NVML Error: {error}[/red]", title="GPU Usage")
+                        try:
+                            power_usage = nvmlDeviceGetPowerUsage(handle) / 1000  # Convert mW to W
+                            power_str = f"{power_usage:.1f}"
+                        except NVMLError:
+                            power_str = "N/A"
+
+                        gpu_table.add_row(
+                            str(i),
+                            gpu_name,
+                            gpu_util,
+                            mem_util,
+                            temp_str,
+                            fan_str,
+                            power_str
+                        )
+                    gpu_panel_item = Panel(gpu_table, border_style="red")
+            except NVMLError:
+                pass # gpu_panel_item will be None
             finally:
                 try:
                     nvmlShutdown()
-                except NVMLError as error:
-                    pass # Already handled, or not initialized
+                except NVMLError:
+                    pass
 
+        if gpu_panel_item:
             layout.split(
                 Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
-                Layout(Panel(gpu_table, border_style="red")),
+                Layout(gpu_panel_item),
                 Layout(Panel(table, border_style="blue"))
             )
         else:
