@@ -1,4 +1,3 @@
-
 import subprocess
 import sys
 import click
@@ -15,13 +14,12 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.progress_bar import ProgressBar
 from rich.layout import Layout
+from rich.text import Text
 
 @click.group()
 def main():
     """A CLI for monitoring system processes."""
     pass
-
-
 
 @main.command()
 def live():
@@ -32,20 +30,34 @@ def live():
 
     def generate_layout() -> Layout:
         nonlocal last_sort_time, process_list
-        # Header
+        
+        # Get terminal dimensions
+        terminal_width = console.size.width
+        terminal_height = console.size.height
+        
+        # Calculate dynamic widths
+        progress_bar_width = max(20, min(50, terminal_width // 3))
+        
+        # Header with system overview
         mem = psutil.virtual_memory()
         cpu_percent = psutil.cpu_percent(interval=None)
         disk_io = psutil.disk_io_counters()
 
-        mem_bar = ProgressBar(total=100, completed=mem.percent, width=40)
-        cpu_bar = ProgressBar(total=100, completed=cpu_percent, width=40)
+        mem_bar = ProgressBar(total=100, completed=mem.percent, width=progress_bar_width)
+        cpu_bar = ProgressBar(total=100, completed=cpu_percent, width=progress_bar_width)
 
+        # Dynamic grid layout
         grid = Table.grid(expand=True)
-        grid.add_column(justify="left", ratio=1)
-        grid.add_column(justify="left", ratio=2)
+        grid.add_column(justify="left", min_width=20, ratio=1)
+        grid.add_column(justify="left", min_width=progress_bar_width, ratio=2)
+        
         grid.add_row(f"[bold green]CPU Usage[/]: {cpu_percent:.1f}%", cpu_bar)
-        grid.add_row(f"[bold yellow]Mem Usage[/]: {mem.used/1024**3:.2f}G/{mem.total/1024**3:.2f}G ({mem.percent}%)", mem_bar)
+        grid.add_row(
+            f"[bold yellow]Memory[/]: {mem.used/1024**3:.1f}G/{mem.total/1024**3:.1f}G ({mem.percent:.1f}%)", 
+            mem_bar
+        )
 
+        gpu_rows = 0
         if HAS_NVML:
             from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown, NVMLError
             try:
@@ -55,136 +67,214 @@ def live():
                     handle = nvmlDeviceGetHandleByIndex(i)
                     utilization = nvmlDeviceGetUtilizationRates(handle)
                     gpu_percent = utilization.gpu
-                    gpu_bar = ProgressBar(total=100, completed=gpu_percent, width=40)
-                    grid.add_row(f"[bold red]GPU {i} Usage[/]: {gpu_percent:.1f}%", gpu_bar)
+                    gpu_bar = ProgressBar(total=100, completed=gpu_percent, width=progress_bar_width)
+                    grid.add_row(f"[bold red]GPU {i}[/]: {gpu_percent:.1f}%", gpu_bar)
+                    gpu_rows += 1
             except NVMLError:
-                pass # Fail silently if we can't get GPU info for the overview
+                pass
             finally:
                 try:
                     nvmlShutdown()
                 except NVMLError:
                     pass
         
+        disk_rows = 0
         if disk_io:
-            grid.add_row(f"[bold blue]Disk I/O[/]: Read {disk_io.read_bytes/1024**3:.2f} GB / Write {disk_io.write_bytes/1024**3:.2f} GB")
+            disk_text = f"[bold blue]Disk I/O[/]: R:{disk_io.read_bytes/1024**3:.1f}GB W:{disk_io.write_bytes/1024**3:.1f}GB"
+            grid.add_row(disk_text, "")
+            disk_rows = 1
 
-        # Process Table
-        table = Table(title="Processes", width=120)
-        table.add_column("PID", justify="right", style="cyan", no_wrap=True, width=8)
-        table.add_column("PName", style="magenta", width=40)
-        table.add_column("CPU %", justify="right", style="green", width=10)
-        table.add_column("Memory %", justify="right", style="yellow", width=12)
-        table.add_column("Read (MB)", justify="right", style="blue", width=12)
-        table.add_column("Write (MB)", justify="right", style="red", width=12)
-
-        current_time = time.time()
-        if current_time - last_sort_time > 2:
-            last_sort_time = current_time
-            process_list = sorted(
-                psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'io_counters']),
-                key=lambda p: p.info['cpu_percent'],
-                reverse=True
-            )
-
-        for proc in process_list[:console.height - 10]:  # Adjust for header
-            try:
-                io_counters = proc.info.get('io_counters')
-                read_mb = io_counters.read_bytes / 1024**2 if io_counters else 0
-                write_mb = io_counters.write_bytes / 1024**2 if io_counters else 0
-                table.add_row(
-                    str(proc.info['pid']),
-                    proc.info['name'],
-                    f"{proc.info['cpu_percent']:.2f}",
-                    f"{proc.info['memory_percent']:.2f}",
-                    f"{read_mb:.2f}",
-                    f"{write_mb:.2f}",
-                )
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                last_sort_time = 0  # Force a refresh on next frame if a process disappears
-                continue
-
-        layout = Layout()
+        # Calculate dynamic process table dimensions
+        overview_rows = 2 + gpu_rows + disk_rows  # CPU, Memory + GPUs + Disk
+        overview_panel_height = overview_rows + 3  # Add padding for panel borders and title
+        
+        # Dynamic GPU panel
         gpu_panel_item = None
+        gpu_panel_height = 0
+        
         if HAS_NVML:
-            from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetName, nvmlDeviceGetUtilizationRates, nvmlShutdown, NVMLError, NVML_TEMPERATURE_GPU, nvmlDeviceGetTemperature, nvmlDeviceGetFanSpeed, nvmlDeviceGetPowerUsage
+            from pynvml import (nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, 
+                              nvmlDeviceGetName, nvmlDeviceGetUtilizationRates, nvmlShutdown, 
+                              NVMLError, NVML_TEMPERATURE_GPU, nvmlDeviceGetTemperature, 
+                              nvmlDeviceGetFanSpeed, nvmlDeviceGetPowerUsage)
             
             try:
                 nvmlInit()
-                if nvmlDeviceGetCount() > 0:
-                    gpu_table = Table(title="GPU Usage")
-                    gpu_table.add_column("GPU", style="cyan")
-                    gpu_table.add_column("Name", style="magenta")
-                    gpu_table.add_column("GPU Util %", justify="right", style="green")
-                    gpu_table.add_column("Mem Util %", justify="right", style="yellow")
-                    gpu_table.add_column("Temp (C)", justify="right", style="red")
-                    gpu_table.add_column("Fan Speed %", justify="right", style="blue")
-                    gpu_table.add_column("Power (W)", justify="right", style="purple")
+                device_count = nvmlDeviceGetCount()
+                if device_count > 0:
+                    # Calculate dynamic column widths for GPU table
+                    gpu_table_width = min(terminal_width - 4, 120)  # Leave margin, max 120
+                    
+                    gpu_table = Table(title="GPU Details", width=gpu_table_width, expand=True)
+                    
+                    # Dynamic column widths based on terminal size
+                    col_widths = {
+                        'gpu': max(4, terminal_width // 20),
+                        'name': max(10, terminal_width // 8),
+                        'gpu_util': max(8, terminal_width // 15),
+                        'mem_util': max(8, terminal_width // 15),
+                        'temp': max(8, terminal_width // 15),
+                        'fan': max(8, terminal_width // 15),
+                        'power': max(8, terminal_width // 15)
+                    }
+                    
+                    gpu_table.add_column("GPU", style="cyan", width=col_widths['gpu'])
+                    gpu_table.add_column("Name", style="magenta", width=col_widths['name'])
+                    gpu_table.add_column("GPU%", justify="right", style="green", width=col_widths['gpu_util'])
+                    gpu_table.add_column("Mem%", justify="right", style="yellow", width=col_widths['mem_util'])
+                    gpu_table.add_column("Temp°C", justify="right", style="red", width=col_widths['temp'])
+                    gpu_table.add_column("Fan%", justify="right", style="blue", width=col_widths['fan'])
+                    gpu_table.add_column("Power W", justify="right", style="purple", width=col_widths['power'])
 
-                    device_count = nvmlDeviceGetCount()
                     for i in range(device_count):
                         handle = nvmlDeviceGetHandleByIndex(i)
-                        gpu_name = nvmlDeviceGetName(handle)
                         
                         try:
+                            gpu_name = nvmlDeviceGetName(handle)
+                            # Truncate long GPU names to fit
+                            if len(gpu_name) > col_widths['name'] - 2:
+                                gpu_name = gpu_name[:col_widths['name'] - 5] + "..."
+                        except NVMLError:
+                            gpu_name = "Unknown"
+                        
+                        # Get all GPU metrics with error handling
+                        try:
                             utilization = nvmlDeviceGetUtilizationRates(handle)
-                            gpu_util = f"{utilization.gpu:.1f}"
-                            mem_util = f"{utilization.memory:.1f}"
+                            gpu_util = f"{utilization.gpu:.0f}"
+                            mem_util = f"{utilization.memory:.0f}"
                         except NVMLError:
                             gpu_util = "N/A"
                             mem_util = "N/A"
 
                         try:
                             temperature = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
-                            temp_str = f"{temperature:.1f}"
+                            temp_str = f"{temperature:.0f}"
                         except NVMLError:
                             temp_str = "N/A"
 
                         try:
                             fan_speed = nvmlDeviceGetFanSpeed(handle)
-                            fan_str = f"{fan_speed:.1f}"
+                            fan_str = f"{fan_speed:.0f}"
                         except NVMLError:
                             fan_str = "N/A"
 
                         try:
-                            power_usage = nvmlDeviceGetPowerUsage(handle) / 1000  # Convert mW to W
-                            power_str = f"{power_usage:.1f}"
+                            power_usage = nvmlDeviceGetPowerUsage(handle) / 1000
+                            power_str = f"{power_usage:.0f}"
                         except NVMLError:
                             power_str = "N/A"
 
-                        gpu_table.add_row(
-                            str(i),
-                            gpu_name,
-                            gpu_util,
-                            mem_util,
-                            temp_str,
-                            fan_str,
-                            power_str
-                        )
-                    device_count = nvmlDeviceGetCount()
-                    # Calculate height for the panel: 1 for title, 1 for header, device_count for rows, 2 for panel borders
-                    panel_height = 1 + 1 + device_count + 2 + 6
-                    gpu_panel_item = Panel(gpu_table, border_style="red", width=80, height=panel_height)
+                        gpu_table.add_row(str(i), gpu_name, gpu_util, mem_util, temp_str, fan_str, power_str)
+                    
+                    gpu_panel_height = device_count + 4  # rows + header + borders + title
+                    gpu_panel_item = Panel(gpu_table, border_style="red", expand=True)
+                    
             except NVMLError:
-                pass # gpu_panel_item will be None
+                pass
             finally:
                 try:
                     nvmlShutdown()
                 except NVMLError:
                     pass
 
+        # Dynamic Process Table
+        available_height = terminal_height - overview_panel_height - gpu_panel_height - 2
+        max_processes = max(5, available_height - 4)  # Minimum 5 processes, adjust for table header/borders
+        
+        table_width = min(terminal_width - 2, 140)  # Dynamic width with reasonable maximum
+        
+        table = Table(title="Top Processes", width=table_width, expand=True)
+        
+        # Calculate dynamic column widths based on terminal size
+        col_ratios = {
+            'pid': max(6, terminal_width // 25),
+            'name': max(15, terminal_width // 6),
+            'cpu': max(8, terminal_width // 18),
+            'memory': max(10, terminal_width // 15),
+            'read': max(10, terminal_width // 15),
+            'write': max(10, terminal_width // 15)
+        }
+        
+        table.add_column("PID", justify="right", style="cyan", no_wrap=True, width=col_ratios['pid'])
+        table.add_column("Process Name", style="magenta", width=col_ratios['name'])
+        table.add_column("CPU %", justify="right", style="green", width=col_ratios['cpu'])
+        table.add_column("Memory %", justify="right", style="yellow", width=col_ratios['memory'])
+        table.add_column("Read MB", justify="right", style="blue", width=col_ratios['read'])
+        table.add_column("Write MB", justify="right", style="red", width=col_ratios['write'])
+
+        # Update process list periodically
+        current_time = time.time()
+        if current_time - last_sort_time > 2:
+            last_sort_time = current_time
+            try:
+                process_list = sorted(
+                    psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'io_counters']),
+                    key=lambda p: p.info.get('cpu_percent', 0) or 0,
+                    reverse=True
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                process_list = []
+
+        # Add processes to table
+        added_processes = 0
+        for proc in process_list:
+            if added_processes >= max_processes:
+                break
+                
+            try:
+                pid = proc.info.get('pid', 'N/A')
+                name = proc.info.get('name', 'Unknown')
+                cpu_pct = proc.info.get('cpu_percent', 0) or 0
+                mem_pct = proc.info.get('memory_percent', 0) or 0
+                
+                # Truncate long process names
+                if len(name) > col_ratios['name'] - 2:
+                    name = name[:col_ratios['name'] - 5] + "..."
+                
+                io_counters = proc.info.get('io_counters')
+                if io_counters:
+                    read_mb = io_counters.read_bytes / 1024**2
+                    write_mb = io_counters.write_bytes / 1024**2
+                else:
+                    read_mb = write_mb = 0
+                
+                table.add_row(
+                    str(pid),
+                    name,
+                    f"{cpu_pct:.1f}",
+                    f"{mem_pct:.1f}",
+                    f"{read_mb:.1f}",
+                    f"{write_mb:.1f}",
+                )
+                added_processes += 1
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                last_sort_time = 0  # Force refresh
+                continue
+
+        # Create dynamic layout
+        layout = Layout()
+        
+        # Calculate section ratios based on content
+        sections = []
+        section_sizes = []
+        
+        # System Overview (always present)
+        sections.append(Layout(Panel(grid, title="System Overview", border_style="green"), 
+                              size=overview_panel_height))
+        
+        # GPU Panel (if available)
         if gpu_panel_item:
-            layout.split(
-                Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
-                Layout(gpu_panel_item),
-                Layout(Panel(table, border_style="blue"))
-            )
-        else:
-            layout.split(
-                Layout(Panel(grid, title="System Overview", border_style="green"), size=5),
-                Layout(Panel(table, border_style="blue"))
-            )
+            sections.append(Layout(gpu_panel_item, size=gpu_panel_height))
+        
+        # Process Table (remaining space)
+        sections.append(Layout(Panel(table, border_style="blue")))
+        
+        # Split layout dynamically
+        layout.split(*sections)
         return layout
 
+    # Start the live display
     with Live(generate_layout(), screen=True, transient=True, refresh_per_second=4) as live:
         try:
             while True:
@@ -205,7 +295,6 @@ def start_collector():
     """Starts the background data collection service."""
     click.echo("Starting data collector in the background...")
     try:
-        # Use subprocess to run collector.py in the background
         subprocess.Popen(["python", "-m", "src.procmon.collector"])
         click.echo("Data collector started. You can close this terminal.")
     except Exception as e:
@@ -260,7 +349,7 @@ def status_collector():
 @click.option('--gpu-index', type=int, help='Filter GPU usage by GPU index.')
 def history(process_name, pid, start_time, end_time, aggregate, output_format, gpu, gpu_index):
     """Query historical process data."""
-    query_history(process_name, pid, start_time, end_time, aggregate, output_format)
+    query_history(process_name, pid, start_time, end_time, aggregate, output_format, gpu, gpu_index)
 
 if __name__ == "__main__":
     main()
