@@ -162,7 +162,7 @@ def live():
                         )
                     device_count = nvmlDeviceGetCount()
                     # Calculate height for the panel: 1 for title, 1 for header, device_count for rows, 2 for panel borders
-                    panel_height = 1 + 1 + device_count + 2
+                    panel_height = 1 + 1 + device_count + 2 + 6
                     gpu_panel_item = Panel(gpu_table, border_style="red", width=80, height=panel_height)
             except NVMLError:
                 pass # gpu_panel_item will be None
