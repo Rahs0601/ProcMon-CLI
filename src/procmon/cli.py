@@ -160,7 +160,7 @@ def live():
                             fan_str,
                             power_str
                         )
-                    gpu_panel_item = Panel(gpu_table, border_style="red")
+                    gpu_panel_item = Panel(gpu_table, border_style="red", width=80)
             except NVMLError:
                 pass # gpu_panel_item will be None
             finally:
