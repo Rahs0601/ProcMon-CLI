@@ -132,8 +132,8 @@ def live():
                         try:
                             gpu_name = nvmlDeviceGetName(handle)
                             # Truncate long GPU names to fit
-                            if len(gpu_name) > col_widths['name'] - 2:
-                                gpu_name = gpu_name[:col_widths['name'] - 5] + "..."
+                            # if len(gpu_name) > col_widths['name']:
+                                # gpu_name = gpu_name[:col_widths['name']] + "..."
                         except NVMLError:
                             gpu_name = "Unknown"
                         
@@ -166,7 +166,7 @@ def live():
 
                         gpu_table.add_row(str(i), gpu_name, gpu_util, mem_util, temp_str, fan_str, power_str)
                     
-                    gpu_panel_height = device_count*2 + 10   # rows + header + borders + title
+                    gpu_panel_height = device_count + 8  # rows + header + borders + title
                     gpu_panel_item = Panel(gpu_table, border_style="red", expand=True)
                     
             except NVMLError:
@@ -275,7 +275,7 @@ def live():
         return layout
 
     # Start the live display
-    with Live(generate_layout(), screen=True, transient=True, refresh_per_second=4) as live:
+    with Live(generate_layout(), screen=True, transient=True, refresh_per_second=1) as live:
         try:
             while True:
                 live.update(generate_layout())
