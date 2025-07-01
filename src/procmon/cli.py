@@ -86,8 +86,8 @@ def live():
 
         # Calculate dynamic process table dimensions
         overview_rows = 2 + gpu_rows + disk_rows  # CPU, Memory + GPUs + Disk
-        overview_panel_height = overview_rows + 3  # Add padding for panel borders and title
-        
+        overview_panel_height = overview_rows * 2  # Add padding for panel borders and title
+
         # Dynamic GPU panel
         gpu_panel_item = None
         gpu_panel_height = 0
@@ -166,7 +166,7 @@ def live():
 
                         gpu_table.add_row(str(i), gpu_name, gpu_util, mem_util, temp_str, fan_str, power_str)
                     
-                    gpu_panel_height = device_count + 4  # rows + header + borders + title
+                    gpu_panel_height = device_count*2 + 10   # rows + header + borders + title
                     gpu_panel_item = Panel(gpu_table, border_style="red", expand=True)
                     
             except NVMLError:
