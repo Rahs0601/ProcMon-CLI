@@ -228,8 +228,8 @@ def live():
                 mem_pct = proc.info.get('memory_percent', 0) or 0
                 
                 # Truncate long process names
-                if len(name) > col_ratios['name'] - 2:
-                    name = name[:col_ratios['name'] - 5] + "..."
+                # if len(name) > col_ratios['name'] - 2:
+                #     name = name[:col_ratios['name'] - 5] + "..."
                 
                 io_counters = proc.info.get('io_counters')
                 if io_counters:
