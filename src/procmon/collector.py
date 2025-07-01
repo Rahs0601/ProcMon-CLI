@@ -1,17 +1,15 @@
 
 import psutil
 import time
-import psycopg2
 from psycopg2 import Error
 from .db import get_db_connection
-import sys
 import os
 import tempfile
 
 try:
-    from pynvml import * # type: ignore
+    from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetName, nvmlDeviceGetUtilizationRates, nvmlDeviceGetTemperature, NVML_TEMPERATURE_GPU, nvmlDeviceGetFanSpeed, nvmlDeviceGetPowerUsage, NVMLError, nvmlShutdown
     HAS_NVML = True
-except:
+except ImportError:
     HAS_NVML = False
 
 PID_FILE = os.path.join(tempfile.gettempdir(), "procmon_collector.pid")
@@ -124,7 +122,7 @@ def collect_gpu_data():
             handle = nvmlDeviceGetHandleByIndex(i)
             gpu_name = nvmlDeviceGetName(handle)
             utilization = nvmlDeviceGetUtilizationRates(handle)
-            temperature = nvmlDeviceGetTemperature(handle, NVML_TEMP_GPU)
+            temperature = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
             fan_speed = nvmlDeviceGetFanSpeed(handle)
             power_usage = nvmlDeviceGetPowerUsage(handle) / 1000 # Convert mW to W
 

@@ -1,5 +1,4 @@
-import pytest
-from src.procmon.db import get_db_connection, setup_database
+
 
 def test_db_connection(db_connection):
     assert db_connection is not None

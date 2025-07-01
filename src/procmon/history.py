@@ -1,6 +1,4 @@
 
-import click
-import psycopg2
 from psycopg2 import Error
 from rich.console import Console
 from rich.table import Table
@@ -114,7 +112,7 @@ def query_history(
                 table = Table(title=f"Historical Process Data ({aggregate if aggregate else 'Raw'})")
                 if aggregate:
                     table.add_column("Time Bucket", style="cyan")
-                    table.add_column("Process Name", style="magenta")
+                    table.add_column("PName", style="magenta")
                     table.add_column("Max CPU %", justify="right", style="green")
                     table.add_column("Avg CPU %", justify="right", style="green")
                     table.add_column("Max Memory %", justify="right", style="yellow")
@@ -122,7 +120,7 @@ def query_history(
                 else:
                     table.add_column("Timestamp", style="cyan")
                     table.add_column("PID", justify="right", style="cyan")
-                    table.add_column("Process Name", style="magenta")
+                    table.add_column("PName", style="magenta")
                     table.add_column("CPU %", justify="right", style="green")
                     table.add_column("Memory %", justify="right", style="yellow")
 

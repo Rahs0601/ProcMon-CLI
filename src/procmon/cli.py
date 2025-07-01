@@ -1,31 +1,37 @@
 
+import subprocess
+import sys
 import click
 from rich.console import Console
 from rich.table import Table
 import psutil
 import time
 from .db import setup_database
-from .collector import collect_data, read_pid_file, delete_pid_file, PID_FILE, HAS_NVML
+from .collector import read_pid_file, delete_pid_file, HAS_NVML
 from .history import query_history
 import os
 import signal
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress_bar import ProgressBar
+from rich.layout import Layout
 
 @click.group()
 def main():
     """A CLI for monitoring system processes."""
     pass
 
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress_bar import ProgressBar
-from rich.layout import Layout
+
 
 @main.command()
 def live():
     """Display a live view of system processes."""
     console = Console()
+    last_sort_time = 0
+    process_list = []
 
     def generate_layout() -> Layout:
+        nonlocal last_sort_time, process_list
         # Header
         mem = psutil.virtual_memory()
         cpu_percent = psutil.cpu_percent(interval=None)
@@ -63,21 +69,24 @@ def live():
             grid.add_row(f"[bold blue]Disk I/O[/]: Read {disk_io.read_bytes/1024**3:.2f} GB / Write {disk_io.write_bytes/1024**3:.2f} GB")
 
         # Process Table
-        table = Table(title="Processes")
-        table.add_column("PID", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Process Name", style="magenta")
-        table.add_column("CPU %", justify="right", style="green")
-        table.add_column("Memory %", justify="right", style="yellow")
-        table.add_column("Read (MB)", justify="right", style="blue")
-        table.add_column("Write (MB)", justify="right", style="red")
+        table = Table(title="Processes", width=120)
+        table.add_column("PID", justify="right", style="cyan", no_wrap=True, width=8)
+        table.add_column("PName", style="magenta", width=40)
+        table.add_column("CPU %", justify="right", style="green", width=10)
+        table.add_column("Memory %", justify="right", style="yellow", width=12)
+        table.add_column("Read (MB)", justify="right", style="blue", width=12)
+        table.add_column("Write (MB)", justify="right", style="red", width=12)
 
-        processes = sorted(
-            psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'io_counters']),
-            key=lambda p: p.info['cpu_percent'],
-            reverse=True
-        )
+        current_time = time.time()
+        if current_time - last_sort_time > 2:
+            last_sort_time = current_time
+            process_list = sorted(
+                psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'io_counters']),
+                key=lambda p: p.info['cpu_percent'],
+                reverse=True
+            )
 
-        for proc in processes[:console.height - 10]:  # Adjust for header
+        for proc in process_list[:console.height - 10]:  # Adjust for header
             try:
                 io_counters = proc.info.get('io_counters')
                 read_mb = io_counters.read_bytes / 1024**2 if io_counters else 0
@@ -91,7 +100,8 @@ def live():
                     f"{write_mb:.2f}",
                 )
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
+                last_sort_time = 0  # Force a refresh on next frame if a process disappears
+                continue
 
         layout = Layout()
         gpu_panel_item = None
@@ -172,10 +182,13 @@ def live():
             )
         return layout
 
-    with Live(generate_layout(), screen=True, transient=True, refresh_per_second=2) as live:
-        while True:
-            live.update(generate_layout())
-            time.sleep(0.5)
+    with Live(generate_layout(), screen=True, transient=True, refresh_per_second=4) as live:
+        try:
+            while True:
+                live.update(generate_layout())
+                time.sleep(0.25)
+        except KeyboardInterrupt:
+            pass
 
 @main.command()
 def setup_db():
@@ -183,8 +196,6 @@ def setup_db():
     click.echo("Setting up database...")
     setup_database()
     click.echo("Database setup complete.")
-
-import subprocess
 
 @main.command()
 def start_collector():
